@@ -16,6 +16,8 @@ public:
 
   // TX
   bool writeTx(const int32_t* stereoFrames, size_t frameCount);
+  // TX (non-blocking). Returns frames actually written.
+  size_t writeTxNonBlocking(const int32_t* stereoFrames, size_t frameCount);
 
   // RX (non-blocking). Returns number of frames actually read (can be 0).
   size_t readRx(int32_t* stereoFrames, size_t maxFrames);

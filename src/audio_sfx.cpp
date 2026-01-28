@@ -78,6 +78,9 @@ void AudioSfx::dumpDefs(Stream& out) const {
 }
 
 void AudioSfx::stop() {
+  playing = false;
+  bufFrames = 0;
+  bufIndex = 0;
   if (i2sRef) i2sRef->stop();
 }
 
@@ -87,52 +90,76 @@ void AudioSfx::playPriority(SfxId id, uint8_t priority, uint32_t nowMs) {
   if (priority == 0) minGap = rateLimitMs * 2;
   if (priority >= 2) minGap = 0;
   if (minGap && (nowMs - lastSfxAt < minGap)) return;
-  if (priority >= 2) stop(); // preempt
+
+  if (playing) {
+    if (priority < 2 && priority <= curPriority) return;
+    stop(); // preempt current
+  }
+
+  curDef = sfxDefs[(int)id];
+  totalFrames = (uint32_t)((uint64_t)curDef.ms * (uint64_t)SAMPLE_RATE / 1000ULL);
+  if (totalFrames < 20) return;
+
+  framesDone = 0;
+  phase = 0.0f;
+  bufFrames = 0;
+  bufIndex = 0;
+  playing = true;
+  curPriority = priority;
   lastSfxAt = nowMs;
-  lastPriority = priority;
-  playBlocking(id);
 }
 
 void AudioSfx::play(SfxId id, uint32_t nowMs) {
   playPriority(id, 1, nowMs);
 }
 
-void AudioSfx::playBlocking(SfxId id) {
-  if (!i2sRef) return;
+void AudioSfx::update(uint32_t nowMs) {
+  (void)nowMs;
+  if (!playing || !i2sRef) return;
 
-  const SfxDef& d = sfxDefs[(int)id];
-  const uint32_t total = (uint32_t)((uint64_t)d.ms * (uint64_t)SAMPLE_RATE / 1000ULL);
-  if (total < 20) return;
-
-  static int32_t buf[512 * 2]; // stereo frames
-  float phase = 0.0f;
-  const float twoPi = 2.0f * 3.1415926535f;
-
-  uint32_t n = 0;
-  while (n < total) {
-    uint32_t frames = total - n;
-    if (frames > 512) frames = 512;
-
-    for (uint32_t i = 0; i < frames; i++) {
-      uint32_t k = n + i;
-      float t = (float)k / (float)total;
-      float f = d.f0 + (d.f1 - d.f0) * t;
-
-      float env = envAD(k, total);
-      float s = waveSample(d.wave, phase) * d.amp * env;
-
-      if (s > 1.0f) s = 1.0f;
-      if (s < -1.0f) s = -1.0f;
-
-      int32_t v = (int32_t)(s * 2147483647.0f);
-      buf[i * 2 + 0] = v;
-      buf[i * 2 + 1] = v;
-
-      phase += twoPi * f / (float)SAMPLE_RATE;
-      if (phase > 100000.0f) phase = fmodf(phase, twoPi);
-    }
-
-    i2sRef->writeTx(buf, frames);
-    n += frames;
+  // Flush pending frames first.
+  if (bufFrames > bufIndex) {
+    size_t toWrite = bufFrames - bufIndex;
+    size_t written = i2sRef->writeTxNonBlocking(buf + (bufIndex * 2), toWrite);
+    bufIndex += written;
+    if (bufIndex < bufFrames) return;
+    bufFrames = 0;
+    bufIndex = 0;
   }
+
+  if (framesDone >= totalFrames) {
+    playing = false;
+    return;
+  }
+
+  size_t frames = (size_t)(totalFrames - framesDone);
+  if (frames > kChunkFrames) frames = kChunkFrames;
+
+  const float twoPi = 2.0f * 3.1415926535f;
+  uint32_t start = framesDone;
+  for (size_t i = 0; i < frames; i++) {
+    uint32_t k = start + (uint32_t)i;
+    float t = (float)k / (float)totalFrames;
+    float f = curDef.f0 + (curDef.f1 - curDef.f0) * t;
+
+    float env = envAD(k, totalFrames);
+    float s = waveSample(curDef.wave, phase) * curDef.amp * env;
+
+    if (s > 1.0f) s = 1.0f;
+    if (s < -1.0f) s = -1.0f;
+
+    int32_t v = (int32_t)(s * 2147483647.0f);
+    buf[i * 2 + 0] = v;
+    buf[i * 2 + 1] = v;
+
+    phase += twoPi * f / (float)SAMPLE_RATE;
+    if (phase > 100000.0f) phase = fmodf(phase, twoPi);
+  }
+
+  framesDone += (uint32_t)frames;
+  bufFrames = frames;
+  bufIndex = 0;
+
+  size_t written = i2sRef->writeTxNonBlocking(buf, bufFrames);
+  bufIndex = written;
 }

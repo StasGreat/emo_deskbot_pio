@@ -35,6 +35,7 @@ public:
   void play(SfxId id, uint32_t nowMs);
   // priority: 0 = low (idle), 1 = normal, 2 = high (scared/surprised)
   void playPriority(SfxId id, uint8_t priority, uint32_t nowMs);
+  void update(uint32_t nowMs);
 
   // Runtime tuning
   SfxDef getDef(SfxId id) const;
@@ -47,7 +48,17 @@ private:
   AudioI2S* i2sRef = nullptr;
   uint32_t lastSfxAt = 0;
   uint32_t rateLimitMs = 700;
-  uint8_t lastPriority = 1;
 
-  void playBlocking(SfxId id);
+  bool playing = false;
+  uint32_t totalFrames = 0;
+  uint32_t framesDone = 0;
+  float phase = 0.0f;
+  uint8_t curPriority = 1;
+  SfxDef curDef = {};
+
+  static const size_t kChunkFrames = 128;
+  int32_t buf[kChunkFrames * 2] = {0};
+  size_t bufFrames = 0;
+  size_t bufIndex = 0;
+
 };

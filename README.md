@@ -33,17 +33,16 @@ Inputs:
 Expected:
 - OLED shows face with state label (BOOT -> IDLE).
 - Touch short: happy expression + chirp.
-- Touch long: sleepy expression + sigh.
-- PTT hold: listening face + ready beep. Release: thinking then speaking placeholder.
+- Touch long: sleepy + sigh when energy is low; otherwise happy + soft chirp.
+- PTT hold: listening face + ready beep. Release (>250ms): thinking then speaking placeholder. Short release: back to idle.
 - Touch during speaking: interrupts sound + annoyed beep.
 
 ## Configuration
 See include/config.h for pins and options like PTT_ACTIVE_LOW.
 
 ## Next steps
-- Replace mock sensors with real INMP441 sound peak detector.
-- Add BMI270 shake/tilt detector.
-- Replace geometry face with bitmap-based face assets if desired.
+- Add real STT/LLM/TTS pipeline (currently simulated).
+- Optional: replace geometry face with bitmap-based face assets.
 
 
 ## INMP441 mic
@@ -85,6 +84,7 @@ See include/config.h for pins and options like PTT_ACTIVE_LOW.
   - high: Surprised/Scared (preempt current audio)
   - normal: UI state cues (Ready/Think/Confirm/Wake)
   - low: idle micro cues (Soft/ChirpMid)
+- Non-blocking SFX: audio is streamed in the main loop; high-priority sounds can interrupt an active one.
 - If sounds are too frequent: increase AUDIO_SFX_RATE_LIMIT_MS in include/config.h or reduce idle sfx chance in src/fsm.cpp.
 
 

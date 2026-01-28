@@ -9,14 +9,13 @@ void AudioI2S::begin() {
   cfg.sample_rate = AUDIO_SAMPLE_RATE;
   cfg.bits_per_sample = I2S_BITS_PER_SAMPLE_32BIT;
   cfg.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT; // stereo
-#ifdef I2S_COMM_FORMAT_STAND_I2S
-  cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
-#else
-  cfg.communication_format = I2S_COMM_FORMAT_I2S;
+#ifndef I2S_COMM_FORMAT_STAND_I2S
+#define I2S_COMM_FORMAT_STAND_I2S ((i2s_comm_format_t)0x01)
 #endif
+  cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
   cfg.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
-  cfg.dma_buf_count = 6;
-  cfg.dma_buf_len = 256;
+  cfg.dma_desc_num = 6;
+  cfg.dma_frame_num = 256;
   cfg.use_apll = false;
   cfg.tx_desc_auto_clear = true;
 
@@ -44,6 +43,15 @@ bool AudioI2S::writeTx(const int32_t* stereoFrames, size_t frameCount) {
   const size_t bytes = frameCount * 2 * sizeof(int32_t);
   esp_err_t err = i2s_write(p, (const char*)stereoFrames, bytes, &bytesWritten, portMAX_DELAY);
   return err == ESP_OK && bytesWritten == bytes;
+}
+
+size_t AudioI2S::writeTxNonBlocking(const int32_t* stereoFrames, size_t frameCount) {
+  if (!started) return 0;
+  size_t bytesWritten = 0;
+  const size_t bytes = frameCount * 2 * sizeof(int32_t);
+  esp_err_t err = i2s_write(p, (const char*)stereoFrames, bytes, &bytesWritten, 0);
+  if (err != ESP_OK) return 0;
+  return bytesWritten / (2 * sizeof(int32_t));
 }
 
 size_t AudioI2S::readRx(int32_t* stereoFrames, size_t maxFrames) {

@@ -65,6 +65,7 @@ void loop() {
   uint32_t now = millis();
 
   console.update(now);
+  sfx.update(now);
 
   inputs.sample(now, q);                    // touch + ptt
   soundDet.update(now, brain.state(), q);   // INMP441 -> SoundPeak

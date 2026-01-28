@@ -35,15 +35,13 @@ float ImuBmi270::computeTiltDeg(float axG, float ayG, float azG) {
 void ImuBmi270::update(uint32_t nowMs, State currentState, EventQueue& q) {
   if (!ok) return;
 
-  bmi2_sens_data data;
-  int8_t r = imu.getSensorData(&data);
+  int8_t r = imu.getSensorData();
   if (r != BMI2_OK) return;
 
-  // Many Bosch BMI2 examples report accel in m/s^2. Convert to g.
-  const float ms2_to_g = 1.0f / 9.80665f;
-  float axRaw = data.acc.x * ms2_to_g;
-  float ayRaw = data.acc.y * ms2_to_g;
-  float azRaw = data.acc.z * ms2_to_g;
+  // Library already converts to g's.
+  float axRaw = imu.data.accelX;
+  float ayRaw = imu.data.accelY;
+  float azRaw = imu.data.accelZ;
 
   // Low-pass accel for orientation (helps jitter)
   ax = ax * (1.0f - accelLp) + axRaw * accelLp;
