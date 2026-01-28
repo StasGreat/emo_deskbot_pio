@@ -44,3 +44,11 @@ See include/config.h for pins and options like PTT_ACTIVE_LOW.
 - Replace mock sensors with real INMP441 sound peak detector.
 - Add BMI270 shake/tilt detector.
 - Replace geometry face with bitmap-based face assets if desired.
+
+
+## INMP441 mic
+- Uses I2S RX on GPIO6 (PIN_I2S_DIN).
+- Clap or loud sound should trigger SURPRISED + POP.
+- If too sensitive, increase threshold in src/main.cpp:
+  soundDet.setPeakThreshold(0.45f);
+- If not sensitive enough, reduce to ~0.25f.

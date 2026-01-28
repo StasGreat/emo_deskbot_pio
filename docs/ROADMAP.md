@@ -126,3 +126,12 @@ Phase 3:
 
 Phase 4:
 - More complex behavior scheduler, personality, long-term preferences.
+
+
+## 12. INMP441 integration (added)
+- I2S configured as full duplex (TX+RX) on I2S0 (shared BCLK/LRCK).
+- Sample format: 32-bit stereo.
+- SoundDetector computes RMS on chunks and adapts noise floor.
+- Emits SoundPeak events with normalized strength (0..1).
+- Suppresses peaks while Listening/Speaking to reduce speaker bleed.
+- Tuning: peakThreshold, noiseAdapt, minIntervalMs.
