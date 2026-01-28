@@ -143,3 +143,35 @@ Phase 4:
 - Shake detection: acceleration magnitude |a| in g -> Event Shake(strength).
 - Tilt detection: angle from vertical via acos(|az|/|a|) with hysteresis -> Event Tilt(strength).
 - Tuning: shakeThresholdG, shakeMinIntervalMs, tiltThresholdDeg, tiltMinIntervalMs.
+
+
+## 14. Gaze-from-IMU (added)
+- IMU computes roll/pitch from the (smoothed) gravity vector.
+- Renderer maps roll/pitch degrees to small pupil offsets (dx/dy) with clamping.
+- Low-pass filter on accel reduces jitter; saccades still add micro-movements.
+- Applied mainly in Idle/Attention/Listening; Processing/Speaking keep gaze centered.
+
+
+## 15. Startle + Attention Hold + Return-to-center (added)
+- Startle: triggered when emotion transitions to Surprised/Scared; 120ms freeze + ~320ms recovery. Wide eyes + pupil kick opposite IMU.
+- Attention Hold: on entering ATTENTION, capture current IMU gaze and hold for ~1500ms.
+- Return-to-center: gaze uses smoothing (alpha) to move towards target; different alpha per state.
+- Saccades are suppressed during startle for a natural micro-freeze.
+
+
+## 16. Breathing idle + Speech-aware gaze (added)
+- Breathing: subtle sinusoid modulates eyebrows/mouth and tiny vertical pupil drift.
+- Speech-aware gaze: after Speaking -> Idle, hold gaze centered for ~900ms (eye contact).
+- Idle micro SFX: rare chirp/sigh scheduled every 8..20s under calm conditions.
+
+
+## 17. Sound-focused sync + motifs (added)
+- AudioSfx now supports priorities: low (idle), normal, high (preempt for scared/surprised).
+- Emotion events trigger matching motifs: Happy=ChirpUp, Curious=ChirpMid(soft), Surprised=Pop(high), Scared=Scared(high), Sleepy/Sad=Sigh.
+- State transitions: Listening=Ready, Processing=Think, Speaking start=Confirm, Sleep wake=Wake.
+
+
+## 18. Serial SFX tuning console (added)
+- Runtime editable SFX definitions (f0, f1, ms, amp, wave) via Serial commands.
+- Helps quickly iterate on character sounds without reflashing.
+- Supports manual play and priority testing.

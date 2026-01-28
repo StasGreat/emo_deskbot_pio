@@ -21,8 +21,17 @@ public:
   void setShakeMinIntervalMs(uint32_t ms) { shakeMinIntervalMs = ms; }
   void setTiltThresholdDeg(float deg) { tiltThresholdDeg = deg; }  // e.g., 25
   void setTiltMinIntervalMs(uint32_t ms) { tiltMinIntervalMs = ms; }
+  void setAccelLowpass(float a) { accelLp = a; }
 
   bool isOk() const { return ok; }
+
+  // Orientation (degrees). Updated on each update() call.
+  float rollDeg() const { return roll; }
+  float pitchDeg() const { return pitch; }
+  // Smoothed acceleration in g (approx gravity vector in static conditions)
+  float axG() const { return ax; }
+  float ayG() const { return ay; }
+  float azG() const { return az; }
 
 private:
   bool ok = false;
@@ -35,6 +44,11 @@ private:
   uint32_t tiltMinIntervalMs = 800;
   uint32_t lastTiltAt = 0;
   bool tilted = false;
+
+  // smoothed accel and derived angles
+  float ax = 0.0f, ay = 0.0f, az = 1.0f;
+  float roll = 0.0f, pitch = 0.0f;
+  float accelLp = 0.15f; // low-pass factor (0..1)
 
   float computeShakeStrength(float amagG);
   float computeTiltDeg(float axG, float ayG, float azG);

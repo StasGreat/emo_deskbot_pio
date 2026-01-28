@@ -2,28 +2,27 @@
 #include "config.h"
 #include <math.h>
 
-enum class Wave : uint8_t { Sine = 0, Square = 1, Noise = 2 };
-
-struct SfxDef {
-  float f0;
-  float f1;
-  uint16_t ms;
-  float amp;   // 0..1
-  Wave wave;
-};
-
 static const int SAMPLE_RATE = AUDIO_SAMPLE_RATE;
 
-static const SfxDef SFX_TABLE[(int)SfxId::Count] = {
-  /*Ready*/   { 880,  880, 120, 0.35f, Wave::Sine   },
-  /*ChirpUp*/ { 520, 1040, 140, 0.40f, Wave::Sine   },
-  /*ChirpMid*/{ 600,  760, 120, 0.25f, Wave::Sine   },
-  /*Pop*/     {1200,  400,  90, 0.45f, Wave::Square },
-  /*Sigh*/    { 420,  260, 260, 0.25f, Wave::Sine   },
-  /*Scared*/  {1400,  900, 160, 0.55f, Wave::Square },
-  /*Down*/    { 520,  220, 180, 0.30f, Wave::Sine   },
-  /*Annoyed*/ { 900,  300, 110, 0.40f, Wave::Square },
+static const SfxDef DEFAULT_SFX[(int)SfxId::Count] = {
+  // UI / state
+  /*Ready*/    { 880,  880, 120, 0.33f, Wave::Sine   }, // short beep
+  // Emotions
+  /*ChirpUp*/  { 520, 1120, 160, 0.42f, Wave::Sine   }, // happy up-chirp
+  /*ChirpMid*/ { 640,  780, 120, 0.22f, Wave::Sine   }, // neutral/curious
+  /*Pop*/      {1300,  520,  95, 0.42f, Wave::Square }, // surprised pop
+  /*Sigh*/     { 420,  240, 280, 0.22f, Wave::Sine   }, // sleepy/sad
+  /*Scared*/   {1500,  720, 180, 0.55f, Wave::Square }, // alarm-ish
+  /*Down*/     { 520,  220, 190, 0.28f, Wave::Sine   }, // cancel / timeout
+  /*Annoyed*/  { 980,  320, 120, 0.40f, Wave::Square }, // annoyed
+  // Extra motifs
+  /*Think*/    { 620,  940, 240, 0.20f, Wave::Sine   }, // thinking sweep (soft)
+  /*Confirm*/  { 740,  990, 150, 0.26f, Wave::Sine   }, // acknowledgement
+  /*Soft*/     { 520,  650, 120, 0.16f, Wave::Sine   }, // gentle tiny chirp
+  /*Wake*/     { 460,  820, 220, 0.30f, Wave::Sine   }, // wake-up/attention
 };
+
+static SfxDef sfxDefs[(int)SfxId::Count];
 
 static uint32_t rng_state = 0x12345678u;
 static inline float frand01() {
@@ -53,31 +52,59 @@ static inline float waveSample(Wave w, float phase) {
 }
 
 void AudioSfx::begin(AudioI2S& i2s) {
+  resetDefaults();
   i2sRef = &i2s;
-  // Ensure shared I2S is running (safe if already started).
   i2sRef->begin();
 }
 
+SfxDef AudioSfx::getDef(SfxId id) const {
+  return sfxDefs[(int)id];
+}
+
+void AudioSfx::setDef(SfxId id, const SfxDef& def) {
+  sfxDefs[(int)id] = def;
+}
+
+void AudioSfx::resetDefaults() {
+  for (int i = 0; i < (int)SfxId::Count; i++) sfxDefs[i] = DEFAULT_SFX[i];
+}
+
+void AudioSfx::dumpDefs(Stream& out) const {
+  out.println("SFX defs:");
+  for (int i = 0; i < (int)SfxId::Count; i++) {
+    const SfxDef& d = sfxDefs[i];
+    out.printf("  %02d: f0=%.1f f1=%.1f ms=%u amp=%.2f wave=%u\n", i, d.f0, d.f1, (unsigned)d.ms, d.amp, (unsigned)d.wave);
+  }
+}
+
 void AudioSfx::stop() {
+  if (i2sRef) i2sRef->stop();
+}
+
+void AudioSfx::playPriority(SfxId id, uint8_t priority, uint32_t nowMs) {
   if (!i2sRef) return;
-  // Clear pending audio from DMA to stop promptly.
-  i2sRef->stop();
+  uint32_t minGap = rateLimitMs;
+  if (priority == 0) minGap = rateLimitMs * 2;
+  if (priority >= 2) minGap = 0;
+  if (minGap && (nowMs - lastSfxAt < minGap)) return;
+  if (priority >= 2) stop(); // preempt
+  lastSfxAt = nowMs;
+  lastPriority = priority;
+  playBlocking(id);
 }
 
 void AudioSfx::play(SfxId id, uint32_t nowMs) {
-  // rate limit
-  if (nowMs - lastSfxAt < rateLimitMs) return;
-  lastSfxAt = nowMs;
-  playBlocking(id);
+  playPriority(id, 1, nowMs);
 }
 
 void AudioSfx::playBlocking(SfxId id) {
   if (!i2sRef) return;
-  const SfxDef& d = SFX_TABLE[(int)id];
+
+  const SfxDef& d = sfxDefs[(int)id];
   const uint32_t total = (uint32_t)((uint64_t)d.ms * (uint64_t)SAMPLE_RATE / 1000ULL);
   if (total < 20) return;
 
-  static int32_t buf[512 * 2]; // 512 stereo frames (32-bit samples)
+  static int32_t buf[512 * 2]; // stereo frames
   float phase = 0.0f;
   const float twoPi = 2.0f * 3.1415926535f;
 
@@ -97,10 +124,9 @@ void AudioSfx::playBlocking(SfxId id) {
       if (s > 1.0f) s = 1.0f;
       if (s < -1.0f) s = -1.0f;
 
-      int16_t v16 = (int16_t)(s * 32767.0f);
-      int32_t v32 = ((int32_t)v16) << 16; // left-align 16-bit audio into 32-bit frame
-      buf[i * 2 + 0] = v32;
-      buf[i * 2 + 1] = v32;
+      int32_t v = (int32_t)(s * 2147483647.0f);
+      buf[i * 2 + 0] = v;
+      buf[i * 2 + 1] = v;
 
       phase += twoPi * f / (float)SAMPLE_RATE;
       if (phase > 100000.0f) phase = fmodf(phase, twoPi);

@@ -19,6 +19,9 @@ private:
   uint32_t listeningStartAt = 0;
   bool capturedAudio = false;
 
+  // Idle micro SFX scheduler
+  uint32_t nextIdleSfxAt = 0;
+
   Mood mood;
   EmotionState emo;
 

@@ -41,9 +41,24 @@ void ImuBmi270::update(uint32_t nowMs, State currentState, EventQueue& q) {
 
   // Many Bosch BMI2 examples report accel in m/s^2. Convert to g.
   const float ms2_to_g = 1.0f / 9.80665f;
-  float axG = data.acc.x * ms2_to_g;
-  float ayG = data.acc.y * ms2_to_g;
-  float azG = data.acc.z * ms2_to_g;
+  float axRaw = data.acc.x * ms2_to_g;
+  float ayRaw = data.acc.y * ms2_to_g;
+  float azRaw = data.acc.z * ms2_to_g;
+
+  // Low-pass accel for orientation (helps jitter)
+  ax = ax * (1.0f - accelLp) + axRaw * accelLp;
+  ay = ay * (1.0f - accelLp) + ayRaw * accelLp;
+  az = az * (1.0f - accelLp) + azRaw * accelLp;
+
+  float axG = ax;
+  float ayG = ay;
+  float azG = az;
+
+  // roll/pitch from gravity vector (deg)
+  // roll: rotation around X axis (left/right tilt)
+  // pitch: rotation around Y axis (forward/back tilt)
+  roll = atan2f(ayG, azG) * 57.2957795f;
+  pitch = atan2f(-axG, sqrtf(ayG*ayG + azG*azG)) * 57.2957795f;
 
   float amagG = sqrtf(axG*axG + ayG*ayG + azG*azG);
 

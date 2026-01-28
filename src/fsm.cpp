@@ -1,11 +1,13 @@
 #include "fsm.h"
 #include "config.h"
+#include "esp_system.h"
 
 static inline float clampf(float v, float lo, float hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
 void Brain::begin(uint32_t nowMs) {
   mood = Mood();
   emo = EmotionState();
+  nextIdleSfxAt = nowMs + 6000;
   enterState(State::Boot, nowMs);
 }
 
@@ -91,32 +93,35 @@ void Brain::emotionHandleEvent(const Event& e, uint32_t nowMs, AudioSfx& audio) 
     case EventType::TouchUp:
       if (e.durationMs <= 400) {
         setEmotion(nowMs, Emotion::Happy, 0.6f, 1100, 350);
-        audio.play(SfxId::ChirpUp, nowMs);
+        audio.playPriority(SfxId::ChirpUp, 1, nowMs);
       }
       break;
 
     case EventType::TouchLong:
       if (mood.energy < 0.25f) {
         setEmotion(nowMs, Emotion::Sleepy, 0.6f, 2000, 800);
-        audio.play(SfxId::Sigh, nowMs);
+        audio.playPriority(SfxId::Sigh, 1, nowMs);
       } else {
         setEmotion(nowMs, Emotion::Happy, 0.4f, 1500, 600);
+        audio.playPriority(SfxId::Soft, 0, nowMs);
       }
       break;
 
     case EventType::SoundPeak:
       if (e.strength > 0.75f) {
         setEmotion(nowMs, Emotion::Surprised, 0.8f, 900, 450);
-        audio.play(SfxId::Pop, nowMs);
+        audio.playPriority(SfxId::Pop, 2, nowMs);
       } else {
         setEmotion(nowMs, Emotion::Curious, 0.5f, 700, 300);
+        // subtle curiosity cue (low priority)
+        audio.playPriority(SfxId::ChirpMid, 0, nowMs);
       }
       break;
 
     case EventType::Shake:
       if (e.strength > 0.6f) {
         setEmotion(nowMs, Emotion::Scared, e.strength, 1400, 700);
-        audio.play(SfxId::Scared, nowMs);
+        audio.playPriority(SfxId::Scared, 2, nowMs);
       }
       break;
 
@@ -135,7 +140,7 @@ void Brain::fsmHandleEvent(const Event& e, uint32_t nowMs, AudioSfx& audio) {
     case State::Idle:
       if (e.type == EventType::PttDown) {
         enterState(State::Listening, nowMs);
-        audio.play(SfxId::Ready, nowMs);
+        audio.playPriority(SfxId::Ready, 1, nowMs);
         setEmotion(nowMs, Emotion::Listening, 0.7f, 3000, 999999);
       } else if (e.type == EventType::TouchDown || e.type == EventType::SoundPeak || e.type == EventType::Shake || e.type == EventType::Tilt) {
         enterState(State::Attention, nowMs);
@@ -148,7 +153,7 @@ void Brain::fsmHandleEvent(const Event& e, uint32_t nowMs, AudioSfx& audio) {
     case State::Attention:
       if (e.type == EventType::PttDown) {
         enterState(State::Listening, nowMs);
-        audio.play(SfxId::Ready, nowMs);
+        audio.playPriority(SfxId::Ready, 1, nowMs);
         setEmotion(nowMs, Emotion::Listening, 0.7f, 3000, 999999);
       } else if (e.type == EventType::Tick1s) {
         if (nowMs >= attentionUntil) enterState(State::Idle, nowMs);
@@ -161,6 +166,7 @@ void Brain::fsmHandleEvent(const Event& e, uint32_t nowMs, AudioSfx& audio) {
         if (capturedAudio) {
           enterState(State::Processing, nowMs);
           setEmotion(nowMs, Emotion::Thinking, 0.6f, 3000, 999999);
+          audio.playPriority(SfxId::Think, 1, nowMs);
         } else {
           enterState(State::Idle, nowMs);
         }
@@ -169,7 +175,7 @@ void Brain::fsmHandleEvent(const Event& e, uint32_t nowMs, AudioSfx& audio) {
       } else if (e.type == EventType::Tick1s && (nowMs - listeningStartAt > LISTENING_MAX_MS)) {
         enterState(State::Idle, nowMs);
         emo.lockUntil = 0;
-        audio.play(SfxId::Down, nowMs);
+        audio.playPriority(SfxId::Down, 1, nowMs);
       } else if (e.type == EventType::Shake && e.strength > 0.6f) {
         enterState(State::Attention, nowMs);
         emo.lockUntil = 0;
@@ -180,8 +186,8 @@ void Brain::fsmHandleEvent(const Event& e, uint32_t nowMs, AudioSfx& audio) {
       // No STT/LLM yet - simulate thinking
       if (e.type == EventType::Tick1s && (nowMs - stateEnterAt > 1200)) {
         enterState(State::Speaking, nowMs);
-        // speaking placeholder SFX
-        audio.play(SfxId::ChirpMid, nowMs);
+        // speaking start cue (ack)
+        audio.playPriority(SfxId::Confirm, 1, nowMs);
       }
       break;
 
@@ -190,14 +196,14 @@ void Brain::fsmHandleEvent(const Event& e, uint32_t nowMs, AudioSfx& audio) {
         // Interrupt speech (later: interrupt TTS stream)
         audio.stop();
         enterState(State::Attention, nowMs);
-        audio.play(SfxId::Annoyed, nowMs);
+        audio.playPriority(SfxId::Annoyed, 1, nowMs);
 
         if (mood.valence < -0.2f || mood.arousal > 0.7f) setEmotion(nowMs, Emotion::Angry, 0.5f, 900, 500);
         else setEmotion(nowMs, Emotion::Curious, 0.4f, 700, 300);
       } else if (e.type == EventType::PttDown) {
         audio.stop();
         enterState(State::Listening, nowMs);
-        audio.play(SfxId::Ready, nowMs);
+        audio.playPriority(SfxId::Ready, 1, nowMs);
       } else if (e.type == EventType::Tick1s && (nowMs - stateEnterAt > 1000)) {
         // placeholder "TTS end"
         enterState(State::Idle, nowMs);
@@ -208,7 +214,7 @@ void Brain::fsmHandleEvent(const Event& e, uint32_t nowMs, AudioSfx& audio) {
     case State::Sleep:
       if (e.type == EventType::TouchDown || (e.type == EventType::SoundPeak && e.strength > 0.75f) || e.type == EventType::PttDown || e.type == EventType::Shake) {
         enterState(State::Attention, nowMs);
-        audio.play(SfxId::ChirpMid, nowMs);
+        audio.playPriority(SfxId::Wake, 1, nowMs);
       }
       break;
 
@@ -223,6 +229,21 @@ void Brain::fsmHandleEvent(const Event& e, uint32_t nowMs, AudioSfx& audio) {
 void Brain::onEvent(const Event& e, uint32_t nowMs, AudioSfx& audio) {
   // 1) periodic mood relax
   if (e.type == EventType::Tick1s) moodRelax1s();
+  // Idle micro SFX (very rare, to feel alive)
+  if (e.type == EventType::Tick1s) {
+    if (st == State::Idle && nowMs >= nextIdleSfxAt) {
+      if (mood.energy > 0.35f && mood.arousal < 0.6f) {
+        uint32_t r = esp_random();
+        if ((r % 3) == 0) {
+          if (mood.valence >= 0.0f) audio.playPriority(SfxId::Wake, 1, nowMs);
+          else audio.playPriority(SfxId::Sigh, 1, nowMs);
+        }
+      }
+      uint32_t r2 = esp_random();
+      nextIdleSfxAt = nowMs + 8000 + (r2 % 12000); // 8..20s
+    }
+  }
+
 
   // 2) mood deltas from event
   applyMoodFromEvent(e);

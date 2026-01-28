@@ -8,9 +8,11 @@
 #include "imu_bmi270.h"
 #include "fsm.h"
 #include "render_oled.h"
+#include "serial_console.h"
 
 static EventQueue q;
 static Inputs inputs;
+
 static AudioI2S audioI2S;
 static AudioSfx sfx;
 static SoundDetector soundDet;
@@ -18,6 +20,7 @@ static ImuBmi270 imu;
 
 static Brain brain;
 static Renderer renderer;
+static SerialConsole console;
 
 void setup() {
   Serial.begin(115200);
@@ -29,6 +32,9 @@ void setup() {
   Serial.printf("I2C SDA=%d SCL=%d\n", PIN_I2C_SDA, PIN_I2C_SCL);
   Serial.printf("I2S BCLK=%d LRCK=%d DOUT=%d DIN=%d\n", PIN_I2S_BCLK, PIN_I2S_LRCK, PIN_I2S_DOUT, PIN_I2S_DIN);
   Serial.printf("Inputs PTT=%d TOUCH=%d\n", PIN_PTT, PIN_TOUCH);
+
+  // Serial sound-tuning console
+  console.begin(Serial, sfx);
 
   inputs.begin();
 
@@ -58,6 +64,8 @@ void setup() {
 void loop() {
   uint32_t now = millis();
 
+  console.update(now);
+
   inputs.sample(now, q);                    // touch + ptt
   soundDet.update(now, brain.state(), q);   // INMP441 -> SoundPeak
   imu.update(now, brain.state(), q);         // BMI270 -> Shake/Tilt
@@ -67,7 +75,8 @@ void loop() {
     brain.onEvent(e, now, sfx);
   }
 
-  renderer.render(now, brain.state(), brain.moodRef(), brain.emotionRef());
+  renderer.render(now, brain.state(), brain.moodRef(), brain.emotionRef(),
+                  imu.rollDeg(), imu.pitchDeg());
 
   delay(FRAME_DELAY_MS);
 }
