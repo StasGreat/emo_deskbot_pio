@@ -135,3 +135,11 @@ Phase 4:
 - Emits SoundPeak events with normalized strength (0..1).
 - Suppresses peaks while Listening/Speaking to reduce speaker bleed.
 - Tuning: peakThreshold, noiseAdapt, minIntervalMs.
+
+
+## 13. BMI270 integration (added)
+- Library: SparkFun BMI270 Arduino Library (PlatformIO registry).
+- IMU init tries I2C addresses 0x68 then 0x69 (common for BMI270 boards).
+- Shake detection: acceleration magnitude |a| in g -> Event Shake(strength).
+- Tilt detection: angle from vertical via acos(|az|/|a|) with hysteresis -> Event Tilt(strength).
+- Tuning: shakeThresholdG, shakeMinIntervalMs, tiltThresholdDeg, tiltMinIntervalMs.

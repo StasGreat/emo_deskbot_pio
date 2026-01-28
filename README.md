@@ -52,3 +52,17 @@ See include/config.h for pins and options like PTT_ACTIVE_LOW.
 - If too sensitive, increase threshold in src/main.cpp:
   soundDet.setPeakThreshold(0.45f);
 - If not sensitive enough, reduce to ~0.25f.
+
+
+## BMI270 IMU
+- Uses I2C on GPIO8/9.
+- On startup Serial prints "BMI270 init: OK" if detected.
+- Shake: movement triggers SCARED + SFX (via existing FSM/Emotion rules).
+- Tilt: tilt beyond threshold triggers ATTENTION/curious behavior.
+- If init fails: check wiring and I2C address (0x68/0x69).
+
+
+## Gaze-from-IMU
+- Eyes follow tilt: roll/pitch from BMI270 are mapped to pupil movement.
+- If gaze is too strong/weak: adjust maxDeg and pixel scale in src/render_oled.cpp.
+- If jittery: increase accel low-pass (imu.setAccelLowpass(0.25f)) or reduce pupil scale.
