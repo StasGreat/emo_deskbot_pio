@@ -5,7 +5,7 @@ class Renderer {
 public:
   void begin();
   void render(uint32_t nowMs, State st, const Mood& mood, const EmotionState& emo,
-              float rollDeg, float pitchDeg);
+              float rollDeg, float pitchDeg, bool debugOverlay, float rms);
 
 private:
   uint32_t nextBlinkAt = 0;

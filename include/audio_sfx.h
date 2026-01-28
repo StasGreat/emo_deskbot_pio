@@ -43,6 +43,10 @@ public:
   void resetDefaults();
   void dumpDefs(Stream& out) const;
   void setRateLimitMs(uint32_t ms) { rateLimitMs = ms; }
+  uint32_t getRateLimitMs() const { return rateLimitMs; }
+  bool isPlaying() const { return playing; }
+  uint8_t currentPriority() const { return curPriority; }
+  void setExternalBusy(bool busy) { externalBusy = busy; }
 
 private:
   AudioI2S* i2sRef = nullptr;
@@ -50,6 +54,7 @@ private:
   uint32_t rateLimitMs = 700;
 
   bool playing = false;
+  bool externalBusy = false;
   uint32_t totalFrames = 0;
   uint32_t framesDone = 0;
   float phase = 0.0f;

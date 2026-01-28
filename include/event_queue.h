@@ -6,6 +6,7 @@ public:
   bool push(const Event& e);
   bool pop(Event& out);
   bool empty() const;
+  int size() const;
 
 private:
   static const int CAP = 16;

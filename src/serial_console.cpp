@@ -3,13 +3,22 @@
 #include <string.h>
 #include <ctype.h>
 
-void SerialConsole::begin(Stream& s, AudioSfx& a) {
+void SerialConsole::begin(Stream& s, AudioSfx& a, AudioI2S& o) {
   io = &s;
   audio = &a;
+  out = &o;
   len = 0;
+  PresetId loadedPreset = PresetId::Default;
+  bool loaded = storage.load(a, &loadedPreset);
+  if (loaded) currentPreset = loadedPreset;
   if (io) {
     io->println();
     io->println("Serial console ready. Type: help");
+    if (loaded) {
+      io->printf("Loaded SFX from NVS. preset=%s rate=%u\n", presetName(currentPreset), (unsigned)a.getRateLimitMs());
+    } else {
+      io->println("No SFX in NVS (or version mismatch). Using defaults.");
+    }
   }
 }
 
@@ -77,6 +86,46 @@ void SerialConsole::update(uint32_t nowMs) {
   }
 }
 
+void SerialConsole::printTestHelp() const {
+  if (!io) return;
+  io->println("Test commands:");
+  io->println("  test on           -> all logs");
+  io->println("  test off          -> stop tests");
+  io->println("  test mic          -> mic levels + mic warn/ok");
+  io->println("  test imu          -> imu logs (ax/ay/az/roll/pitch)");
+  io->println("  test sound <id|name|emotion>");
+  io->println("Examples:");
+  io->println("  test mic");
+  io->println("  test imu");
+  io->println("  test sound happy");
+  io->println("  test sound 3");
+}
+
+bool SerialConsole::parseSfxId(const char* s, SfxId* outId) const {
+  if (!s || !outId) return false;
+  bool ok = false;
+  long idv = parseLong(s, &ok);
+  if (ok && idv >= 0 && idv < (long)SfxId::Count) {
+    *outId = (SfxId)idv;
+    return true;
+  }
+
+  if (tokenEq(s, "ready")) { *outId = SfxId::Ready; return true; }
+  if (tokenEq(s, "chirpup") || tokenEq(s, "happy")) { *outId = SfxId::ChirpUp; return true; }
+  if (tokenEq(s, "chirpmid") || tokenEq(s, "curious") || tokenEq(s, "neutral")) { *outId = SfxId::ChirpMid; return true; }
+  if (tokenEq(s, "pop") || tokenEq(s, "surprised")) { *outId = SfxId::Pop; return true; }
+  if (tokenEq(s, "sigh") || tokenEq(s, "sad") || tokenEq(s, "sleepy")) { *outId = SfxId::Sigh; return true; }
+  if (tokenEq(s, "scared")) { *outId = SfxId::Scared; return true; }
+  if (tokenEq(s, "down")) { *outId = SfxId::Down; return true; }
+  if (tokenEq(s, "annoyed") || tokenEq(s, "angry")) { *outId = SfxId::Annoyed; return true; }
+  if (tokenEq(s, "think") || tokenEq(s, "thinking")) { *outId = SfxId::Think; return true; }
+  if (tokenEq(s, "confirm")) { *outId = SfxId::Confirm; return true; }
+  if (tokenEq(s, "soft")) { *outId = SfxId::Soft; return true; }
+  if (tokenEq(s, "wake")) { *outId = SfxId::Wake; return true; }
+
+  return false;
+}
+
 void SerialConsole::handleLine(const char* lineIn, uint32_t nowMs) {
   if (!io || !audio) return;
 
@@ -91,18 +140,120 @@ void SerialConsole::handleLine(const char* lineIn, uint32_t nowMs) {
   if (tokenEq(t0, "help")) {
     io->println("Commands:");
     io->println("  help");
+    io->println("  test on|off|mic|imu|sound"); // test off
+    io->println("  mic on|off|toggle");
+    io->println("  vol [0..1.5|0..100]"); // vol 0.2
     io->println("  sfx list");
     io->println("  sfx dump");
     io->println("  sfx play <id> [prio 0..2]");
     io->println("  sfx set <id> f0|f1|ms|amp|wave <value>");
     io->println("  sfx rate <ms>");
     io->println("  sfx reset");
+    io->println("  sfx preset <default|cute|serious|emo|stackchan>");
+    io->println("  sfx show");
+    io->println("  sfx save");
+    io->println("  sfx load");
+    io->println("  sfx clear");
     io->println("Examples:");
     io->println("  sfx play 3 2");
     io->println("  sfx set 3 amp 0.55");
     io->println("  sfx set 5 f0 1800");
     io->println("  sfx set 5 f1 900");
     io->println("  sfx dump");
+    io->println("  test mic");
+    io->println("  test imu");
+    io->println("  test sound happy");
+    return;
+  }
+
+  if (tokenEq(t0, "test")) {
+    const char* tmode = strtok(nullptr, " ");
+    if (!tmode) {
+      const char* mode =
+        (testMode == TestMode::All) ? "ALL" :
+        (testMode == TestMode::Mic) ? "MIC" :
+        (testMode == TestMode::Imu) ? "IMU" :
+        (testMode == TestMode::Sound) ? "SOUND" : "OFF";
+      io->printf("test mode: %s\n", mode);
+      printTestHelp();
+      return;
+    }
+    if (tokenEq(tmode, "on")) {
+      testMode = TestMode::All;
+      io->println("test mode ALL");
+      printTestHelp();
+    } else if (tokenEq(tmode, "off")) {
+      testMode = TestMode::Off;
+      io->println("test mode OFF");
+    } else if (tokenEq(tmode, "mic")) {
+      testMode = TestMode::Mic;
+      io->println("test mode MIC");
+      printTestHelp();
+    } else if (tokenEq(tmode, "imu")) {
+      testMode = TestMode::Imu;
+      io->println("test mode IMU");
+      printTestHelp();
+    } else if (tokenEq(tmode, "sound")) {
+      testMode = TestMode::Sound;
+      printTestHelp();
+      const char* tname = strtok(nullptr, " ");
+      if (!tname) {
+        io->println("Usage: test sound <id|name|emotion>");
+        io->println("Names: ready, chirpup, chirpmid, pop, sigh, scared, down, annoyed, think, confirm, soft, wake");
+        return;
+      }
+      SfxId id;
+      if (!parseSfxId(tname, &id)) {
+        io->println("Unknown sound. Use sfx list to see IDs.");
+        return;
+      }
+      audio->playPriority(id, 1, nowMs);
+      SfxDef d = audio->getDef(id);
+      io->printf("SFX %d: f0=%.1f f1=%.1f ms=%u amp=%.2f wave=%u\n",
+                 (int)id, d.f0, d.f1, (unsigned)d.ms, d.amp, (unsigned)d.wave);
+      if (out) io->printf("volume=%.2f\n", out->getTxGain());
+      io->printf("rateLimitMs=%u\n", (unsigned)audio->getRateLimitMs());
+    } else {
+      io->println("Usage: test on|off|mic|imu|sound");
+    }
+    return;
+  }
+
+  if (tokenEq(t0, "mic")) {
+    const char* tmode = strtok(nullptr, " ");
+    if (!tmode || tokenEq(tmode, "toggle")) {
+      micMonitorEnabled = !micMonitorEnabled;
+      io->printf("mic monitor: %s\n", micMonitorEnabled ? "ON" : "OFF");
+      return;
+    }
+    if (tokenEq(tmode, "on")) {
+      micMonitorEnabled = true;
+      io->println("mic monitor ON");
+      return;
+    }
+    if (tokenEq(tmode, "off")) {
+      micMonitorEnabled = false;
+      io->println("mic monitor OFF");
+      return;
+    }
+    io->println("Usage: mic on|off|toggle");
+    return;
+  }
+
+  if (tokenEq(t0, "vol")) {
+    if (!out) { io->println("Audio output not set"); return; }
+    const char* tvol = strtok(nullptr, " ");
+    if (!tvol) {
+      io->printf("volume=%.2f\n", out->getTxGain());
+      return;
+    }
+    bool ok = false;
+    float v = parseFloat(tvol, &ok);
+    if (!ok || v < 0.0f) { io->println("Usage: vol <0..1.5|0..100>"); return; }
+    if (v > 1.5f) v = v / 100.0f;
+    if (v > 1.5f) v = 1.5f;
+    out->setTxGain(v);
+    io->printf("volume set to %.2f\n", v);
     return;
   }
 
@@ -133,13 +284,51 @@ void SerialConsole::handleLine(const char* lineIn, uint32_t nowMs) {
 
   if (tokenEq(t1, "dump")) {
     audio->dumpDefs(*io);
-    io->printf("rateLimitMs=%u\n", (unsigned)AUDIO_SFX_RATE_LIMIT_MS);
+    io->printf("rateLimitMs=%u\n", (unsigned)audio->getRateLimitMs());
     return;
   }
 
   if (tokenEq(t1, "reset")) {
     audio->resetDefaults();
+    currentPreset = PresetId::Default;
     io->println("SFX reset to defaults.");
+    return;
+  }
+
+  if (tokenEq(t1, "show")) {
+    io->printf("preset=%s rateLimitMs=%u\n", presetName(currentPreset), (unsigned)audio->getRateLimitMs());
+    return;
+  }
+
+  if (tokenEq(t1, "preset")) {
+    const char* name = strtok(nullptr, " ");
+    if (!name) { io->println("Usage: sfx preset <default|cute|serious|emo|stackchan>"); return; }
+    PresetId p = PresetId::Default;
+    if (!parsePreset(name, &p)) { io->println("Unknown preset. Use default|cute|serious|emo|stackchan"); return; }
+    applyPreset(p, *audio);
+    currentPreset = p;
+    io->printf("Applied preset: %s\n", presetName(currentPreset));
+    return;
+  }
+
+  if (tokenEq(t1, "save")) {
+    bool ok = storage.save(*audio, currentPreset);
+    io->println(ok ? "Saved SFX to NVS." : "Save failed.");
+    return;
+  }
+
+  if (tokenEq(t1, "load")) {
+    PresetId p = PresetId::Default;
+    bool ok = storage.load(*audio, &p);
+    if (ok) currentPreset = p;
+    io->println(ok ? "Loaded SFX from NVS." : "Load failed (empty or version mismatch).");
+    if (ok) io->printf("preset=%s rateLimitMs=%u\n", presetName(currentPreset), (unsigned)audio->getRateLimitMs());
+    return;
+  }
+
+  if (tokenEq(t1, "clear")) {
+    storage.clear();
+    io->println("Cleared SFX NVS namespace.");
     return;
   }
 

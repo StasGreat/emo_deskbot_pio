@@ -17,6 +17,10 @@ public:
   void setNoiseAdapt(float v) { noiseAdapt = v; }            // 0..1
   void setMinIntervalMs(uint32_t v) { minIntervalMs = v; }
 
+  float lastRms() const { return lastRmsValue; }
+  float lastStrength() const { return lastStrengthValue; }
+  float noiseFloorLevel() const { return noiseFloor; }
+
 private:
   AudioI2S* i2sRef = nullptr;
 
@@ -27,4 +31,7 @@ private:
   uint32_t lastPeakAt = 0;
 
   float readRmsChunk();
+
+  float lastRmsValue = 0.0f;
+  float lastStrengthValue = 0.0f;
 };

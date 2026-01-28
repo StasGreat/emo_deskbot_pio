@@ -8,6 +8,7 @@ void Brain::begin(uint32_t nowMs) {
   mood = Mood();
   emo = EmotionState();
   nextIdleSfxAt = nowMs + 6000;
+  nextIdleEmoAt = nowMs + 3000;
   enterState(State::Boot, nowMs);
 }
 
@@ -17,6 +18,7 @@ void Brain::enterState(State next, uint32_t nowMs) {
 
   if (st == State::Attention) {
     attentionUntil = nowMs + ATTENTION_DEFAULT_MS;
+    attentionCooldownUntil = nowMs + ATTENTION_COOLDOWN_MS;
   }
   if (st == State::Listening) {
     listeningStartAt = nowMs;
@@ -142,8 +144,12 @@ void Brain::fsmHandleEvent(const Event& e, uint32_t nowMs, AudioSfx& audio) {
         enterState(State::Listening, nowMs);
         audio.playPriority(SfxId::Ready, 1, nowMs);
         setEmotion(nowMs, Emotion::Listening, 0.7f, 3000, 999999);
-      } else if (e.type == EventType::TouchDown || e.type == EventType::SoundPeak || e.type == EventType::Shake || e.type == EventType::Tilt) {
-        enterState(State::Attention, nowMs);
+      } else if (e.type == EventType::TouchDown || e.type == EventType::Shake || e.type == EventType::Tilt) {
+        if (nowMs >= attentionCooldownUntil) {
+          if (e.type != EventType::Tilt || e.strength >= ATTENTION_TILT_MIN_STRENGTH) {
+            enterState(State::Attention, nowMs);
+          }
+        }
       } else if (e.type == EventType::Tick1s && mood.energy < 0.15f) {
         enterState(State::Sleep, nowMs);
         setEmotion(nowMs, Emotion::Sleepy, 0.6f, 2000, 800);
@@ -162,11 +168,17 @@ void Brain::fsmHandleEvent(const Event& e, uint32_t nowMs, AudioSfx& audio) {
 
     case State::Listening:
       if (e.type == EventType::PttUp) {
-        capturedAudio = (nowMs - listeningStartAt > 250);
+        capturedAudio = (e.durationMs > 0) ? (e.durationMs > 250) : (nowMs - listeningStartAt > 250);
         if (capturedAudio) {
-          enterState(State::Processing, nowMs);
-          setEmotion(nowMs, Emotion::Thinking, 0.6f, 3000, 999999);
-          audio.playPriority(SfxId::Think, 1, nowMs);
+          #if DICTAPHONE_MODE
+            enterState(State::Speaking, nowMs);
+            setEmotion(nowMs, Emotion::Thinking, 0.4f, 700, 300);
+            audio.playPriority(SfxId::Confirm, 1, nowMs);
+          #else
+            enterState(State::Processing, nowMs);
+            setEmotion(nowMs, Emotion::Thinking, 0.6f, 3000, 999999);
+            audio.playPriority(SfxId::Think, 1, nowMs);
+          #endif
         } else {
           enterState(State::Idle, nowMs);
         }
@@ -204,6 +216,9 @@ void Brain::fsmHandleEvent(const Event& e, uint32_t nowMs, AudioSfx& audio) {
         audio.stop();
         enterState(State::Listening, nowMs);
         audio.playPriority(SfxId::Ready, 1, nowMs);
+      } else if (e.type == EventType::TtsEnd) {
+        enterState(State::Idle, nowMs);
+        emo.lockUntil = 0;
       } else if (e.type == EventType::Tick1s && (nowMs - stateEnterAt > 1000)) {
         // placeholder "TTS end"
         enterState(State::Idle, nowMs);
@@ -231,6 +246,7 @@ void Brain::onEvent(const Event& e, uint32_t nowMs, AudioSfx& audio) {
   if (e.type == EventType::Tick1s) moodRelax1s();
   // Idle micro SFX (very rare, to feel alive)
   if (e.type == EventType::Tick1s) {
+    #if ENABLE_IDLE_SFX
     if (st == State::Idle && nowMs >= nextIdleSfxAt) {
       if (mood.energy > 0.35f && mood.arousal < 0.6f) {
         uint32_t r = esp_random();
@@ -241,6 +257,22 @@ void Brain::onEvent(const Event& e, uint32_t nowMs, AudioSfx& audio) {
       }
       uint32_t r2 = esp_random();
       nextIdleSfxAt = nowMs + 8000 + (r2 % 12000); // 8..20s
+    }
+    #endif
+
+    // Idle micro emotion based on mood (keep it subtle)
+    if (st == State::Idle && nowMs >= nextIdleEmoAt && emo.cur == Emotion::Neutral) {
+      if (mood.valence > 0.4f) {
+        setEmotion(nowMs, Emotion::Happy, 0.35f, 1200, 600);
+      } else if (mood.valence < -0.2f) {
+        setEmotion(nowMs, Emotion::Sad, 0.35f, 1200, 600);
+      } else if (mood.arousal > 0.6f) {
+        setEmotion(nowMs, Emotion::Curious, 0.35f, 1200, 600);
+      } else if (mood.energy < 0.2f) {
+        setEmotion(nowMs, Emotion::Sleepy, 0.35f, 1200, 600);
+      }
+      uint32_t r3 = esp_random();
+      nextIdleEmoAt = nowMs + 3000 + (r3 % 4000); // 3..7s
     }
   }
 

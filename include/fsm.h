@@ -16,11 +16,13 @@ private:
   uint32_t stateEnterAt = 0;
 
   uint32_t attentionUntil = 0;
+  uint32_t attentionCooldownUntil = 0;
   uint32_t listeningStartAt = 0;
   bool capturedAudio = false;
 
   // Idle micro SFX scheduler
   uint32_t nextIdleSfxAt = 0;
+  uint32_t nextIdleEmoAt = 0;
 
   Mood mood;
   EmotionState emo;

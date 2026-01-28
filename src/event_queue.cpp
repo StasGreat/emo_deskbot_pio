@@ -18,3 +18,9 @@ bool EventQueue::pop(Event& out) {
 bool EventQueue::empty() const {
   return t == h;
 }
+
+int EventQueue::size() const {
+  int s = h - t;
+  if (s < 0) s += CAP;
+  return s;
+}

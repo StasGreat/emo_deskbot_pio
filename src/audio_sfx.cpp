@@ -85,7 +85,7 @@ void AudioSfx::stop() {
 }
 
 void AudioSfx::playPriority(SfxId id, uint8_t priority, uint32_t nowMs) {
-  if (!i2sRef) return;
+  if (!i2sRef || externalBusy) return;
   uint32_t minGap = rateLimitMs;
   if (priority == 0) minGap = rateLimitMs * 2;
   if (priority >= 2) minGap = 0;

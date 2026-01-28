@@ -9,6 +9,36 @@ static U8G2_SH1106_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE, PIN_I2C_S
 
 static inline int clamp(int v, int lo, int hi) { return v < lo ? lo : (v > hi ? hi : v); }
 
+static const char* stateShort(State s) {
+  switch (s) {
+    case State::Boot: return "BOOT";
+    case State::Idle: return "IDLE";
+    case State::Attention: return "ATTN";
+    case State::Listening: return "LISTN";
+    case State::Processing: return "THNK";
+    case State::Speaking: return "SPK";
+    case State::Sleep: return "SLEEP";
+    case State::Error: return "ERR";
+    default: return "?";
+  }
+}
+
+static const char* emoShort(Emotion e) {
+  switch (e) {
+    case Emotion::Neutral: return "NEUT";
+    case Emotion::Curious: return "CURI";
+    case Emotion::Happy: return "HAP";
+    case Emotion::Sad: return "SAD";
+    case Emotion::Angry: return "ANG";
+    case Emotion::Surprised: return "SURP";
+    case Emotion::Scared: return "SCARE";
+    case Emotion::Sleepy: return "SLEEP";
+    case Emotion::Listening: return "LIST";
+    case Emotion::Thinking: return "THNK";
+    default: return "?";
+  }
+}
+
 static inline int randRange(int a, int b) {
   if (b <= a) return a;
   return a + (esp_random() % (uint32_t)(b - a + 1));
@@ -66,15 +96,15 @@ void Renderer::updateIdleAnim(uint32_t nowMs, State st, const Mood& mood, const 
   }
   // Gaze controller: IMU gaze + Attention Hold + Return-to-center + Startle
   // 1) Compute IMU desired gaze (pixels)
-  const float maxDeg = 35.0f; // clamp degrees
+  const float maxDeg = 20.0f; // clamp degrees (stronger response)
   float r = rollDeg;
   float p = pitchDeg;
   if (r > maxDeg) r = maxDeg;
   if (r < -maxDeg) r = -maxDeg;
   if (p > maxDeg) p = maxDeg;
   if (p < -maxDeg) p = -maxDeg;
-  float imuX = (r / maxDeg) * 4.0f; // 35deg -> 4px
-  float imuY = (p / maxDeg) * 3.0f; // 35deg -> 3px
+  float imuX = (r / maxDeg) * 7.0f; // stronger horizontal response
+  float imuY = (p / maxDeg) * 5.0f; // stronger vertical response
 
   // 2) Startle trigger on emotion transition to Surprised/Scared
   bool startleNow = false;
@@ -155,10 +185,11 @@ void Renderer::updateIdleAnim(uint32_t nowMs, State st, const Mood& mood, const 
   }
 }
 
-static const int EYE_Y = 20;
-static const int EYE_LX = 24;
-static const int EYE_RX = 74;
-static const int BROW_Y = 10;
+static const int EYE_W = 40;
+static const int EYE_H = 28;
+static const int EYE_R = 10;
+static const int EYE_GAP = 8;
+static const int EYE_Y_BASE = 12;
 static const int MOUTH_Y = 46;
 
 void Renderer::drawFace(State st, const Mood& mood, const EmotionState& emo) {
@@ -187,43 +218,72 @@ void Renderer::drawFace(State st, const Mood& mood, const EmotionState& emo) {
   if (emo.cur == Emotion::Surprised) browTilt = 4;
   if (emo.cur == Emotion::Sad) browTilt = 2;
 
+  // Eye geometry (from EmoBot project)
+  int eyeW = EYE_W;
+  int eyeH = EYE_H;
+  int eyeR = EYE_R;
+  int eyeY = EYE_Y_BASE;
+  if (wide) { eyeH = 32; eyeY = 10; }
+  else if (squint) { eyeH = 20; eyeY = 18; }
+  else if (droop) { eyeH = 22; eyeY = 16; }
+
+  int eyeLX = (128 / 2) - (EYE_GAP / 2) - eyeW;
+  int eyeRX = (128 / 2) + (EYE_GAP / 2);
+
+  int browY = eyeY - 6 + breathBrowOffset;
   // Left brow line
-  u8g2.drawLine(EYE_LX, BROW_Y + breathBrowOffset, EYE_LX + 20, BROW_Y + browTilt + breathBrowOffset);
+  u8g2.drawLine(eyeLX + 6, browY, eyeLX + eyeW - 2, browY + browTilt);
   // Right brow line
-  u8g2.drawLine(EYE_RX, BROW_Y + browTilt + breathBrowOffset, EYE_RX + 20, BROW_Y + breathBrowOffset);
+  u8g2.drawLine(eyeRX + 2, browY + browTilt, eyeRX + eyeW - 6, browY);
 
   // Eyes
   auto drawEye = [&](int x) {
-    if (sleepy) {
-      u8g2.drawLine(x, EYE_Y + 8, x + 26, EYE_Y + 8);
-      return;
+    // White eye shape
+    u8g2.setDrawColor(1);
+    u8g2.drawRBox(x, eyeY, eyeW, eyeH, eyeR);
+
+    // Pupil
+    if (!sleepy && !blink) {
+      int cx = x + eyeW / 2;
+      int cy = eyeY + eyeH / 2;
+      int pr = (int)((eyeW < eyeH ? eyeW : eyeH) * 0.18f);
+      if (pr < 2) pr = 2;
+      if (pr > 7) pr = 7;
+
+      int px = cx + pupilDx;
+      int py = cy + pupilDy;
+      int minX = x + eyeR + pr;
+      int maxX = x + eyeW - eyeR - pr;
+      int minY = eyeY + eyeR + pr;
+      int maxY = eyeY + eyeH - eyeR - pr;
+      if (px < minX) px = minX;
+      if (px > maxX) px = maxX;
+      if (py < minY) py = minY;
+      if (py > maxY) py = maxY;
+
+      u8g2.setDrawColor(0);
+      u8g2.drawDisc(px, py, pr);
+      u8g2.setDrawColor(1);
+      u8g2.drawPixel(px - pr / 2, py - pr / 2);
     }
-    if (blink || squint) {
-      u8g2.drawLine(x, EYE_Y + 8, x + 26, EYE_Y + 8);
-      if (squint) u8g2.drawLine(x + 3, EYE_Y + 10, x + 23, EYE_Y + 10);
-      return;
-    }
-    if (wide) {
-      u8g2.drawFrame(x, EYE_Y, 26, 18);
-    } else if (droop) {
-      u8g2.drawFrame(x, EYE_Y + 3, 26, 15);
-    } else {
-      u8g2.drawFrame(x, EYE_Y + 2, 26, 16);
+
+    // Eyelids (mask top/bottom)
+    float lid = 0.0f;
+    if (sleepy) lid = 0.8f;
+    else if (blink) lid = 1.0f;
+    else if (squint) lid = 0.45f;
+    else if (droop) lid = 0.25f;
+    int cover = (int)(eyeH * 0.58f * lid);
+    if (cover > 0) {
+      u8g2.setDrawColor(0);
+      u8g2.drawBox(x - 1, eyeY - 1, eyeW + 2, cover);
+      u8g2.drawBox(x - 1, eyeY + eyeH - cover, eyeW + 2, cover + 1);
+      u8g2.setDrawColor(1);
     }
   };
 
-  drawEye(EYE_LX);
-  drawEye(EYE_RX);
-
-  // Pupils
-  if (!sleepy && !blink) {
-    int pxL = EYE_LX + 10 + pupilDx;
-    int pyL = EYE_Y + 7 + pupilDy;
-    int pxR = EYE_RX + 10 + pupilDx;
-    int pyR = EYE_Y + 7 + pupilDy;
-    u8g2.drawBox(pxL, pyL, 5, 5);
-    u8g2.drawBox(pxR, pyR, 5, 5);
-  }
+  drawEye(eyeLX);
+  drawEye(eyeRX);
 
   // Mouth
   int mouthY = MOUTH_Y + breathMouthOffset;
@@ -266,11 +326,29 @@ void Renderer::drawFace(State st, const Mood& mood, const EmotionState& emo) {
   u8g2.print(stName);
 }
 
-void Renderer::render(uint32_t nowMs, State st, const Mood& mood, const EmotionState& emo, float rollDeg, float pitchDeg) {
+void Renderer::render(uint32_t nowMs, State st, const Mood& mood, const EmotionState& emo,
+                      float rollDeg, float pitchDeg, bool debugOverlay, float rms) {
   updateIdleAnim(nowMs, st, mood, emo, rollDeg, pitchDeg);
   lastState = st;
   lastEmotion = emo.cur;
   u8g2.clearBuffer();
   drawFace(st, mood, emo);
+  if (debugOverlay) {
+    u8g2.setFont(u8g2_font_5x7_tf);
+    u8g2.setCursor(0, 8);
+    u8g2.print("ST:");
+    u8g2.print(stateShort(st));
+    u8g2.print(" EM:");
+    u8g2.print(emoShort(emo.cur));
+    u8g2.setCursor(0, 16);
+    u8g2.print("R:");
+    u8g2.print((int)lroundf(rollDeg));
+    u8g2.print(" P:");
+    u8g2.print((int)lroundf(pitchDeg));
+    u8g2.setCursor(0, 24);
+    u8g2.print("RMS:");
+    u8g2.print(rms, 2);
+    u8g2.setFont(u8g2_font_6x10_tf);
+  }
   u8g2.sendBuffer();
 }

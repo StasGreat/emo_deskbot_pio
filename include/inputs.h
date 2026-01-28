@@ -10,6 +10,8 @@ public:
   void setMockSound(float v) { mockSound = v; }
   void setMockShake(float v) { mockShake = v; }
   void setMockTilt(bool v) { mockTilt = v; }
+  bool touchActive() const { return lastTouch; }
+  bool pttActive() const { return lastPtt; }
 
 private:
   bool lastTouch = false;
